@@ -558,6 +558,7 @@ table.lt{width:100%;border-collapse:collapse;font-size:12px}
     <div class="ct-chips">
       <span class="ct-chip" id="ctChipBand">Band: 0–104″</span>
       <span class="ct-chip" id="ctChipLabor">Labor ×1</span>
+      <button class="btn-settings" style="margin-left:6px" onclick="openLaborHwPanel()">🔒 Labor &amp; Hardware Pricing</button>
     </div>
   </div>
 
@@ -755,6 +756,16 @@ table.lt{width:100%;border-collapse:collapse;font-size:12px}
   </div>
 </div>
 
+<!-- Curtain Labor & Hardware Pricing (password-gated) -->
+<div class="pricing-panel" id="laborHwPanel">
+  <div class="pricing-header"><h3>Curtain Labor &amp; Hardware Pricing</h3><button class="btn-close-p" onclick="closeLaborHwPanel()">✕ Close</button></div>
+  <div class="pricing-scroll" id="laborHwScroll"></div>
+  <div class="pricing-footer" style="flex-wrap:wrap;gap:6px">
+    <button class="btn-save-p" onclick="saveLaborHwPricing()" style="flex:1;min-width:120px">✅ Save &amp; Apply</button>
+    <button class="btn-reset-p" onclick="resetLaborHwPricing()">↺ Reset to Defaults</button>
+  </div>
+</div>
+
 <script>
 // ══════════════════════════════════════════════════════════
 // TAB SWITCHING
@@ -765,6 +776,118 @@ function switchTab(n){
   document.getElementById('tab'+n).classList.add('active');
   document.getElementById('tbtn'+n).classList.add('active');
   if(n===3 && typeof ctCalc==='function') setTimeout(ctCalc, 10);
+}
+
+// ══════════════════════════════════════════════════════════
+// CURTAIN LABOR & HARDWARE PRICING (password-gated, editable)
+// ══════════════════════════════════════════════════════════
+const CT_LABOR_HW_PASSWORD = 'GRAYHOME';
+const CT_LABOR_HW_KEY = 'grayCurtainLaborHW';
+
+// Every number the S-Fold / Ring / Pleated labor & hardware formulas use,
+// grouped for the settings panel. Defaults reflect current pricing —
+// Labor Base S-Fold/Ring updated to ₱130/panel per the latest price revision.
+const CT_LABOR_HW_FIELDS = [
+  {group:'Labor Rates', key:'laborBaseSFoldRing', label:'Labor Base — S-Fold / Ring (₱/panel)', def:130, step:1},
+  {group:'Labor Rates', key:'laborBasePleated', label:'Labor Base — Pleated (₱/panel)', def:130, step:1},
+  {group:'Labor Rates', key:'laborMultMediumThreshold', label:'Height Multiplier ×2 kicks in above (in)', def:105, step:1},
+  {group:'Labor Rates', key:'laborMultHighThreshold', label:'Height Multiplier ×3 kicks in above (in)', def:300, step:1},
+
+  {group:'S-Fold Hardware', key:'sfHookQty', label:'Hook & Tape — qty per panel', def:11, step:1},
+  {group:'S-Fold Hardware', key:'sfHookPrice', label:'Hook & Tape — price per hook (₱)', def:3.5, step:0.1},
+  {group:'S-Fold Hardware', key:'sfHookSides', label:'Hook & Tape — sides multiplier', def:2, step:1},
+  {group:'S-Fold Hardware', key:'sfRunnerQty', label:'Runners — qty per panel', def:11, step:1},
+  {group:'S-Fold Hardware', key:'sfRunnerPrice', label:'Runners — price per runner (₱)', def:5, step:0.1},
+  {group:'S-Fold Hardware', key:'sfRunnerSides', label:'Runners — sides multiplier', def:2, step:1},
+  {group:'S-Fold Hardware', key:'sfClipFlat', label:'Clip (₱ flat per window)', def:200, step:1},
+  {group:'S-Fold Hardware', key:'sfEndCapFlat', label:'End Cap (₱ flat per window)', def:200, step:1},
+  {group:'S-Fold Hardware', key:'sfTrackFlat', label:'Track (₱ flat per window)', def:1400, step:1},
+  {group:'S-Fold Hardware', key:'sfBracketPerPanel', label:'Bracket (₱ per panel)', def:360, step:1},
+  {group:'S-Fold Hardware', key:'sfHangerFlat', label:'Hanger (₱ flat per window)', def:350, step:1},
+  {group:'S-Fold Hardware', key:'sfInstallFlat', label:'Installation (₱ flat per window)', def:750, step:1},
+
+  {group:'Ring Hardware', key:'rgGrommetQty', label:'Grommet — qty per panel', def:11, step:1},
+  {group:'Ring Hardware', key:'rgGrommetPrice', label:'Grommet — price per grommet (₱)', def:4, step:0.1},
+  {group:'Ring Hardware', key:'rgBracketFlat', label:'Bracket (₱ flat per window)', def:300, step:1},
+  {group:'Ring Hardware', key:'rgHangerFlat', label:'Hanger (₱ flat per window)', def:350, step:1},
+  {group:'Ring Hardware', key:'rgEndPoleFlat', label:'End Pole (₱ flat per window)', def:400, step:1},
+  {group:'Ring Hardware', key:'rgRodPerInch', label:'Rod (₱ per inch of width)', def:3, step:0.1},
+  {group:'Ring Hardware', key:'rgInstallFlat', label:'Installation (₱ flat per window)', def:750, step:1},
+
+  {group:'Panel & Yard Rules', key:'basePanelDivisorSFoldRing', label:'Base panel divisor — S-Fold/Ring (in/panel)', def:18, step:0.5},
+  {group:'Panel & Yard Rules', key:'basePanelDivisorPleated', label:'Base panel divisor — Pleated (in/panel)', def:15, step:0.5},
+  {group:'Panel & Yard Rules', key:'inBandHeightSFold', label:'In-band height — S-Fold (in)', def:105, step:1},
+  {group:'Panel & Yard Rules', key:'inBandHeightPleated', label:'In-band height — Pleated (in)', def:100, step:1},
+  {group:'Panel & Yard Rules', key:'inBandHeightRing', label:'In-band height — Ring (in)', def:103, step:1},
+];
+
+const CT_LABOR_HW_DEFAULTS = {};
+CT_LABOR_HW_FIELDS.forEach(f=>{ CT_LABOR_HW_DEFAULTS[f.key] = f.def; });
+
+function loadCtLaborHW(){
+  try{
+    const saved = JSON.parse(localStorage.getItem(CT_LABOR_HW_KEY)||'{}');
+    return Object.assign({}, CT_LABOR_HW_DEFAULTS, saved);
+  }catch(e){
+    return Object.assign({}, CT_LABOR_HW_DEFAULTS);
+  }
+}
+let CT_LABOR_HW = loadCtLaborHW();
+
+function openLaborHwPanel(){
+  const entered = prompt('Enter the password to edit Curtain Labor & Hardware pricing:');
+  if(entered===null) return; // cancelled
+  if(entered.trim().toUpperCase() !== CT_LABOR_HW_PASSWORD){
+    alert('Incorrect password.');
+    return;
+  }
+  const scroll = document.getElementById('laborHwScroll');
+  const groups = [...new Set(CT_LABOR_HW_FIELDS.map(f=>f.group))];
+  scroll.innerHTML = groups.map(g=>{
+    const rows = CT_LABOR_HW_FIELDS.filter(f=>f.group===g).map(f=>`
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">
+        <span style="flex:1;font-size:12px;line-height:1.3">${f.label}</span>
+        <input type="number" step="${f.step}" data-key="${f.key}" value="${CT_LABOR_HW[f.key]}"
+          style="width:90px;padding:5px 7px;border:1px solid var(--border);border-radius:6px;font-size:12px;text-align:right;font-family:'DM Sans',sans-serif">
+      </div>`).join('');
+    return `<div class="pricing-group">
+      <div class="pricing-group-title">${g}</div>
+      ${rows}
+    </div>`;
+  }).join('');
+  document.getElementById('laborHwPanel').classList.add('open');
+}
+
+function closeLaborHwPanel(){ document.getElementById('laborHwPanel').classList.remove('open'); }
+
+function saveLaborHwPricing(){
+  const inputs = document.querySelectorAll('#laborHwScroll input[data-key]');
+  const updated = {};
+  inputs.forEach(el=>{
+    const v = parseFloat(el.value);
+    updated[el.dataset.key] = isNaN(v) ? CT_LABOR_HW_DEFAULTS[el.dataset.key] : v;
+  });
+  CT_LABOR_HW = Object.assign({}, CT_LABOR_HW_DEFAULTS, updated);
+  localStorage.setItem(CT_LABOR_HW_KEY, JSON.stringify(CT_LABOR_HW));
+  closeLaborHwPanel();
+  if(typeof ctCalc==='function') ctCalc();
+  if(typeof render==='function') render();
+  alert('Curtain labor & hardware pricing updated!');
+}
+
+function resetLaborHwPricing(){
+  if(!confirm('Reset all curtain labor & hardware pricing to factory defaults?')) return;
+  CT_LABOR_HW = Object.assign({}, CT_LABOR_HW_DEFAULTS);
+  localStorage.removeItem(CT_LABOR_HW_KEY);
+  openLaborHwPanelRefreshOnly();
+  if(typeof ctCalc==='function') ctCalc();
+  if(typeof render==='function') render();
+}
+// Re-render the open panel's inputs after a reset, without asking for the password again
+function openLaborHwPanelRefreshOnly(){
+  const scroll = document.getElementById('laborHwScroll');
+  if(!scroll) return;
+  scroll.querySelectorAll('input[data-key]').forEach(el=>{ el.value = CT_LABOR_HW[el.dataset.key]; });
 }
 
 // ══════════════════════════════════════════════════════════
@@ -2590,12 +2713,15 @@ function fabCommit(key, code, series, price){
 
 function _ctSAddSimple(p, en){
   if(!en||p<=0) return 0;
-  const t=p*11*3.5*2, r=p*11*5*2, c=200, e=200, tr=1400, b=p*360, h=350, i=750;
+  const L=CT_LABOR_HW;
+  const t=p*L.sfHookQty*L.sfHookPrice*L.sfHookSides, r=p*L.sfRunnerQty*L.sfRunnerPrice*L.sfRunnerSides,
+        c=L.sfClipFlat, e=L.sfEndCapFlat, tr=L.sfTrackFlat, b=p*L.sfBracketPerPanel, h=L.sfHangerFlat, i=L.sfInstallFlat;
   return t+r+c+e+tr+b+h+i;
 }
 function _ctRAddSimple(p, en, wIn){
   if(!en||p<=0) return 0;
-  const g=p*11*4, b=300, h=350, e=400, rod=wIn*3, i=750;
+  const L=CT_LABOR_HW;
+  const g=p*L.rgGrommetQty*L.rgGrommetPrice, b=L.rgBracketFlat, h=L.rgHangerFlat, e=L.rgEndPoleFlat, rod=wIn*L.rgRodPerInch, i=L.rgInstallFlat;
   return g+b+h+e+rod+i;
 }
 
@@ -2609,10 +2735,11 @@ function computeCurtainAmount(ci){
   const useOut = !!(ci.outerCode && pOut>0);
   if(!useIn && !useOut) return 0;
   const effFinish = ci.finish||'S-Fold';
-  const basePanels = Math.max(2, Math.ceil(w / (effFinish==='Pleated' ? 15 : 18)));
-  const laborBase = effFinish==='Pleated' ? 130 : 120;
-  let laborMult=1; if(h>300) laborMult=3; else if(h>105) laborMult=2;
-  const panelThr=(effFinish==='S-Fold'?105:(effFinish==='Pleated'?100:103));
+  const L = CT_LABOR_HW;
+  const basePanels = Math.max(2, Math.ceil(w / (effFinish==='Pleated' ? L.basePanelDivisorPleated : L.basePanelDivisorSFoldRing)));
+  const laborBase = effFinish==='Pleated' ? L.laborBasePleated : L.laborBaseSFoldRing;
+  let laborMult=1; if(h>L.laborMultHighThreshold) laborMult=3; else if(h>L.laborMultMediumThreshold) laborMult=2;
+  const panelThr=(effFinish==='S-Fold'?L.inBandHeightSFold:(effFinish==='Pleated'?L.inBandHeightPleated:L.inBandHeightRing));
   const inBand = h<=panelThr;
   let panels=0, yards=0;
   if(inBand){
@@ -3242,12 +3369,15 @@ function ctUpdateChips(h, laborMult){
 
 function ctSAdd(p, en){
   if(!en) return {t:0,r:0,c:0,e:0,tr:0,b:0,h:0,i:0,s:0};
-  const t=p*11*3.5*2, r=p*11*5*2, c=200, e=200, tr=1400, b=p*360, h=350, i=750;
+  const L=CT_LABOR_HW;
+  const t=p*L.sfHookQty*L.sfHookPrice*L.sfHookSides, r=p*L.sfRunnerQty*L.sfRunnerPrice*L.sfRunnerSides,
+        c=L.sfClipFlat, e=L.sfEndCapFlat, tr=L.sfTrackFlat, b=p*L.sfBracketPerPanel, h=L.sfHangerFlat, i=L.sfInstallFlat;
   return {t,r,c,e,tr,b,h,i,s:t+r+c+e+tr+b+h+i};
 }
 function ctRAdd(p, en, width){
   if(!en) return {g:0,b:0,h:0,e:0,rod:0,i:0,s:0};
-  const g=p*11*4, b=300, h=350, e=400, rod=width*3, i=750;
+  const L=CT_LABOR_HW;
+  const g=p*L.rgGrommetQty*L.rgGrommetPrice, b=L.rgBracketFlat, h=L.rgHangerFlat, e=L.rgEndPoleFlat, rod=width*L.rgRodPerInch, i=L.rgInstallFlat;
   return {g,b,h,e,rod,i,s:g+b+h+e+rod+i};
 }
 function ctSAddPleatedAllHalf(obj){
@@ -3268,13 +3398,14 @@ function ctCalc(){
   if(!isFinite(w)||!isFinite(h)){ ids.forEach(i=>{ const n=ct$(i); if(n) n.textContent='–'; }); return; }
 
   const effFinish = (ctFinishMode==='pl') ? 'Pleated' : finishSel;
+  const L = CT_LABOR_HW;
   // Panel threshold: height at which panels switch to height-based yard calc
-  const panelThr = (effFinish==='S-Fold'?105:(effFinish==='Pleated'?100:103));
+  const panelThr = (effFinish==='S-Fold'?L.inBandHeightSFold:(effFinish==='Pleated'?L.inBandHeightPleated:L.inBandHeightRing));
   const inBand = (h<=panelThr);
 
-  const basePanels = Math.max(2, Math.ceil(w / (effFinish==='Pleated' ? 15 : 18)));
-  const laborBase = (effFinish==='Pleated' ? 130 : 120);
-  let laborMult = 1; if(h>300) laborMult=3; else if(h>105) laborMult=2;
+  const basePanels = Math.max(2, Math.ceil(w / (effFinish==='Pleated' ? L.basePanelDivisorPleated : L.basePanelDivisorSFoldRing)));
+  const laborBase = (effFinish==='Pleated' ? L.laborBasePleated : L.laborBaseSFoldRing);
+  let laborMult = 1; if(h>L.laborMultHighThreshold) laborMult=3; else if(h>L.laborMultMediumThreshold) laborMult=2;
   ctUpdateChips(h, laborMult);
 
   let panels=0, yards=0;
